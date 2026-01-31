@@ -1,0 +1,23 @@
+{
+  "pins": {
+    "s6-overlay-aarch64": {
+      "type": "Tarball",
+      "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.2.0/s6-overlay-aarch64.tar.xz",
+      "hash": "sha256-5Ra9/FyQodWiodplx9YPi5bhLlAghZgNLtO9e51Gk2I=",
+      "frozen": true
+    },
+    "s6-overlay-noarch": {
+      "type": "Tarball",
+      "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.2.0/s6-overlay-noarch.tar.xz",
+      "hash": "sha256-qT87UugSNk8KvCN5LPsayx83QyDB7Vo8bz67+98kzrE=",
+      "frozen": true
+    },
+    "s6-overlay-x86_64": {
+      "type": "Tarball",
+      "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.2.0/s6-overlay-x86_64.tar.xz",
+      "hash": "sha256-nlj5fFyF8LDtnQbRQNDSsbZPsISNCmsA2gwl0XreNZs=",
+      "frozen": true
+    }
+  },
+  "version": 7
+}
