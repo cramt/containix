@@ -9,13 +9,13 @@
     "s6-overlay-noarch": {
       "type": "Tarball",
       "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.2.0/s6-overlay-noarch.tar.xz",
-      "hash": "sha256-qT87UugSNk8KvCN5LPsayx83QyDB7Vo8bz67+98kzrE=",
+      "hash": "sha256-hYSPa6q0n7eDKlVXZExzwGaJntRY3RYBA1zxjnx1nyY=",
       "frozen": true
     },
     "s6-overlay-x86_64": {
       "type": "Tarball",
       "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.2.0/s6-overlay-x86_64.tar.xz",
-      "hash": "sha256-nlj5fFyF8LDtnQbRQNDSsbZPsISNCmsA2gwl0XreNZs=",
+      "hash": "sha256-Wgni8YeNxffwIR3Xuv7T7uGv5PgT6HL/8qsZV/Jmx8A=",
       "frozen": true
     }
   },

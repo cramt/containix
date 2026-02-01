@@ -1,5 +1,5 @@
 # Base module: core options that map directly to mkS6RcImage arguments.
-{ lib, config, ... }:
+{ lib, pkgs, config, ... }:
 
 {
   options = {
@@ -18,7 +18,47 @@
       user = lib.mkOption {
         type = lib.types.str;
         default = "1000:1000";
-        description = "User:group the container runs as.";
+        description = "User:group the container runs as (OCI User metadata).";
+      };
+
+      users = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.submodule {
+          options = {
+            uid = lib.mkOption { type = lib.types.int; };
+            gid = lib.mkOption { type = lib.types.int; };
+            home = lib.mkOption {
+              type = lib.types.str;
+              default = "/nonexistent";
+            };
+            shell = lib.mkOption {
+              type = lib.types.str;
+              default = "/bin/sh";
+            };
+            description = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+            };
+          };
+        });
+        default = {
+          root = { uid = 0; gid = 0; home = "/root"; shell = "/bin/sh"; };
+          nobody = { uid = 65534; gid = 65534; home = "/nonexistent"; shell = "/usr/sbin/nologin"; };
+        };
+        description = "Users to create in /etc/passwd.";
+      };
+
+      groups = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.submodule {
+          options = {
+            gid = lib.mkOption { type = lib.types.int; };
+          };
+        });
+        default = {
+          root = { gid = 0; };
+          nogroup = { gid = 65534; };
+          nobody = { gid = 65534; };
+        };
+        description = "Groups to create in /etc/group.";
       };
 
       labels = lib.mkOption {
@@ -78,6 +118,20 @@
           default = "5s";
           description = "Grace period after start before healthchecks count.";
         };
+      };
+
+      shell = lib.mkOption {
+        type = lib.types.package;
+        default = pkgs.bash;
+        defaultText = lib.literalExpression "pkgs.bash";
+        description = "The package providing /bin/sh (must have /bin/sh or /bin/bash).";
+      };
+
+      basePackages = lib.mkOption {
+        type = lib.types.listOf lib.types.package;
+        default = [ pkgs.coreutils ];
+        defaultText = lib.literalExpression "[ pkgs.coreutils ]";
+        description = "Packages whose binaries are symlinked into /usr/bin.";
       };
     };
 

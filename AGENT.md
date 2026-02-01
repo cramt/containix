@@ -24,20 +24,24 @@ mk-s6rc-image.nix               # Low-level builder: s6-overlay rootfs + nix2con
 npins/
   sources.json                  # Pinned s6-overlay tarballs (managed by npins).
   default.nix                   # npins boilerplate (not used directly; we read sources.json).
-modules/
-  default.nix                   # Base module: core options (image.*, environment, packages, etc.)
-  services/
-    nginx.nix                   # services.nginx – NixOS-style virtualHosts/locations/upstreams.
-    caddy.nix                   # services.caddy – Caddy with Caddyfile generation from virtualHosts.
-    cron.nix                    # services.cron – Scheduled tasks via supercronic.
-    grafana-alloy.nix           # services.grafana-alloy – metrics agent (prometheus scrape/remote-write).
-    tailscale-ssh.nix           # services.tailscale-ssh – Tailscale VPN + Dropbear SSH access.
-examples/
-  nginx-static/                 # Minimal: nginx serving a static site.
-  reverse-proxy/                # nginx reverse proxy + custom s6 app service.
-  monitored-app/                # Full-stack: nginx + postgres + redis + alloy + cron + tailscale.
-AGENT.md                        # This file.
-README.md                       # Brief project description.
+  modules/
+    default.nix                   # Base module: core options (image.*, environment, packages, etc.)
+    services/
+      nginx.nix                   # services.nginx – NixOS-style virtualHosts/locations/upstreams.
+      caddy.nix                   # services.caddy – Caddy with Caddyfile generation from virtualHosts.
+      cron.nix                    # services.cron – Scheduled tasks via supercronic.
+      grafana-alloy.nix           # services.grafana-alloy – metrics agent (prometheus scrape/remote-write).
+      tailscale-ssh.nix           # services.tailscale-ssh – Tailscale VPN + Dropbear SSH access.
+      openssh.nix                 # services.openssh – SSH/SFTP server.
+  examples/
+    nginx-static/                 # Minimal: nginx serving a static site.
+    reverse-proxy/                # nginx reverse proxy + custom s6 app service.
+    monitored-app/                # Full-stack: nginx + alloy + cron + tailscale.
+    openssh-server/               # SSH server with host key generation and pubkey auth.
+  AGENT.md                        # This file.
+  README.md                       # Comprehensive documentation.
+  PLAN.md                         # Roadmap and task tracker.
+
 ```
 
 ## Architecture
@@ -180,6 +184,7 @@ store paths that npins' `fetchTarball`/`fetchzip` would produce.
 | `services.cron`          | `jobs.<name>.{schedule, command}`                              |
 | `services.grafana-alloy` | `configFile` or `configText`, `postgres.customQueries`         |
 | `services.tailscale-ssh` | `loginServer`, `advertiseExitNode`, `sshPort`, `extraPackages` |
+| `services.openssh`       | `authorizedKeys`, `port`, `generateHostKeys`                   |
 
 The nginx module generates `nginx.conf` from structured `virtualHosts`, `locations`,
 and `upstreams` options -- same pattern as the NixOS nginx module. The caddy module
@@ -221,18 +226,6 @@ The flake evaluates for all default systems.
 
 ## Development
 
-- No formal test suite yet. Validate with `nix flake show` and `nix eval`.
-- Quick smoke test:
-  ```sh
-  nix eval --impure --expr '
-    let
-      flake = builtins.getFlake (toString ./.);
-      mkContainer = flake.lib.x86_64-linux.mkContainer;
-    in (mkContainer {
-      image.name = "test";
-      services.nginx.enable = true;
-    }).name
-  '
-  ```
-- The `files` option `source` field accepts both paths and derivations
-  (e.g. `pkgs.writeText` output).
+- **Eval checks**: `nix flake check` validates all modules and examples evaluate correctly.
+- **Integration tests**: `nix run .#integration-test` builds and runs real containers using Docker, asserting on HTTP responses, environment variables, OCI metadata, and secrets.
+- **CI**: GitHub Actions runs both eval checks and integration tests on every push.

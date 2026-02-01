@@ -19,9 +19,9 @@ let
   writeExe = { root, path, text }:
     ''
       mkdir -p "$(dirname "${root}/${path}")"
-      cat > "${root}/${path}" <<'EOF'
-      ${text}
-      EOF
+      cat > "${root}/${path}" << 'ENDOFSCRIPT'
+${text}
+ENDOFSCRIPT
       chmod +x "${root}/${path}"
     '';
 
@@ -45,9 +45,9 @@ let
           if kind == "longrun" then ''
             mkdir -p "${root}/etc/s6-overlay/s6-rc.d/${name}"
             echo "longrun" > "${root}/etc/s6-overlay/s6-rc.d/${name}/type"
-            cat > "${root}/etc/s6-overlay/s6-rc.d/${name}/dependencies" <<'EOF'
-            ${depsText}
-            EOF
+            cat > "${root}/etc/s6-overlay/s6-rc.d/${name}/dependencies" << 'ENDDEPS'
+${depsText}
+ENDDEPS
             ${writeExe {
               root = root;
               path = "etc/s6-overlay/s6-rc.d/${name}/run";
@@ -61,33 +61,64 @@ let
           else if kind == "oneshot" then ''
             mkdir -p "${root}/etc/s6-overlay/s6-rc.d/${name}"
             echo "oneshot" > "${root}/etc/s6-overlay/s6-rc.d/${name}/type"
-            cat > "${root}/etc/s6-overlay/s6-rc.d/${name}/dependencies" <<'EOF'
-            ${depsText}
-            EOF
+            cat > "${root}/etc/s6-overlay/s6-rc.d/${name}/dependencies" << 'ENDDEPS'
+${depsText}
+ENDDEPS
+            # Oneshot `up` scripts are executed by execlineb, not as
+            # regular shell scripts.  We write the user script to a
+            # separate .sh file and have the `up` file invoke it via
+            # with-contenv + sh.
             ${writeExe {
               root = root;
-              path = "etc/s6-overlay/s6-rc.d/${name}/up";
+              path = "etc/s6-overlay/s6-rc.d/${name}/up.sh";
               text = ''
-                #!/command/with-contenv sh
+                #!/bin/sh
                 set -eu
                 ${spec.up}
               '';
             }}
+            ${writeExe {
+              root = root;
+              path = "etc/s6-overlay/s6-rc.d/${name}/up";
+              text = ''
+                /command/with-contenv /bin/sh /etc/s6-overlay/s6-rc.d/${name}/up.sh
+              '';
+            }}
             ${
-              if spec ? down then writeExe {
-                root = root;
-                path = "etc/s6-overlay/s6-rc.d/${name}/down";
-                text = ''
-                  #!/command/with-contenv sh
-                  set -eu
-                  ${spec.down}
-                '';
-              } else ""
+              if spec ? down then
+                writeExe {
+                  root = root;
+                  path = "etc/s6-overlay/s6-rc.d/${name}/down.sh";
+                  text = ''
+                    #!/bin/sh
+                    set -eu
+                    ${spec.down}
+                  '';
+                }
+                + writeExe {
+                  root = root;
+                  path = "etc/s6-overlay/s6-rc.d/${name}/down";
+                  text = ''
+                    /command/with-contenv /bin/sh /etc/s6-overlay/s6-rc.d/${name}/down.sh
+                  '';
+                }
+              else ""
             }
           ''
           else throw "mkS6RcImage: service ${name} has unknown kind ${kind}";
+      # Register each service in the s6-overlay "user" bundle so it
+      # actually gets started.  s6-overlay looks for empty files in
+      # /etc/s6-overlay/s6-rc.d/user/contents.d/<service-name>.
+      mkUserBundle = names: ''
+        mkdir -p "${root}/etc/s6-overlay/s6-rc.d/user/contents.d"
+        ${lib.concatMapStringsSep "\n" (n: ''
+          touch "${root}/etc/s6-overlay/s6-rc.d/user/contents.d/${n}"
+        '') names}
+      '';
     in
-      lib.concatStringsSep "\n" (lib.mapAttrsToList mkOne services);
+      lib.concatStringsSep "\n" (lib.mapAttrsToList mkOne services)
+      + "\n"
+      + mkUserBundle (builtins.attrNames services);
 
 in
 
@@ -104,6 +135,10 @@ in
 , exposedPorts ? []          # list of port ints -> OCI ExposedPorts
 , volumes ? []               # list of path strings -> OCI Volumes
 , healthcheck ? null         # { command, interval, timeout, retries, startPeriod } or null
+, users ? {}
+, groups ? {}
+, shell ? pkgs.bash
+, basePackages ? [ pkgs.coreutils ]
 }:
 
 let
@@ -129,11 +164,45 @@ let
     set -eu
     mkdir -p "$out"
 
-    # Install s6-overlay into rootfs: provides /init and /command/* [1](https://discourse.nixos.org/t/how-to-run-a-dockertools-built-image-with-virtualisation-oci-containers-containers/62410)
-    tar -C "$out" -Jxpf ${s6NoarchTar}
-    tar -C "$out" -Jxpf ${s6ArchTar}
+    # Install s6-overlay into rootfs: provides /init and /command/*
+    # Use --no-same-permissions to avoid setuid failures in the Nix sandbox.
+    # The setuid bit on s6-overlay-suexec is not needed for container use
+    # (containers run as root or use user namespaces).
+    tar -C "$out" --no-same-permissions -Jxf ${s6NoarchTar}
+    tar -C "$out" --no-same-permissions -Jxf ${s6ArchTar}
 
-    # s6-overlay will start s6-rc services from /etc/s6-overlay/s6-rc.d at init [1](https://discourse.nixos.org/t/how-to-run-a-dockertools-built-image-with-virtualisation-oci-containers-containers/62410)
+    # Minimal /etc/passwd and /etc/group so the container runtime can
+    # resolve user names. Without these, Docker refuses to start the
+    # container when User is set to a name like "root".
+    mkdir -p "$out/etc"
+    cat > "$out/etc/passwd" <<'PASSWD'
+root:x:0:0:root:/root:/bin/sh
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+PASSWD
+    cat > "$out/etc/group" <<'GROUP'
+root:x:0:
+nogroup:x:65534:
+nobody:x:65534:
+GROUP
+    mkdir -p "$out/root" "$out/tmp"
+
+    # s6-overlay expects /run and /var/run (symlinked).
+    mkdir -p "$out/run"
+    mkdir -p "$out/var"
+    ln -sf /run "$out/var/run"
+
+    # s6-overlay's /init is a shell script that requires /bin/sh.
+    # Provide bash and coreutils in /bin and /usr/bin so that s6-overlay
+    # init scripts and service run scripts have a working environment.
+    mkdir -p "$out/bin" "$out/usr/bin"
+    ln -sf ${pkgs.bash}/bin/bash "$out/bin/sh"
+    ln -sf ${pkgs.bash}/bin/bash "$out/bin/bash"
+    for exe in ${pkgs.coreutils}/bin/*; do
+      ln -sf "$exe" "$out/usr/bin/$(basename "$exe")"
+    done
+    ln -sf ${pkgs.coreutils}/bin/env "$out/bin/env"
+
+    # s6-overlay will start s6-rc services from /etc/s6-overlay/s6-rc.d at init
     mkdir -p "$out/etc/s6-overlay/s6-rc.d"
 
     # Drop extra files/configs

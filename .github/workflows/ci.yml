@@ -6,13 +6,12 @@ on:
   pull_request:
 
 jobs:
-  check:
+  eval-checks:
+    name: Eval checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: DeterminateSystems/nix-installer-action@main
-
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: nix flake check
@@ -20,3 +19,14 @@ jobs:
 
       - name: Build eval checks
         run: nix build .#checks.x86_64-linux.eval-full --print-build-logs
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Run integration tests
+        run: nix run .#integration-test --print-build-logs
