@@ -1,5 +1,10 @@
 # AGENT.md
 
+## Roadmap & Progress
+
+See **[PLAN.md](./PLAN.md)** for the full roadmap, task tracker, and session log.
+That file is the source of truth for what's done, what's in progress, and what's next.
+
 ## What is this repo?
 
 Containix is a **mini NixOS for containers**. It uses the NixOS module system
@@ -24,8 +29,6 @@ modules/
   services/
     nginx.nix                   # services.nginx – NixOS-style virtualHosts/locations/upstreams.
     caddy.nix                   # services.caddy – Caddy with Caddyfile generation from virtualHosts.
-    postgresql.nix              # services.postgresql – PostgreSQL with initdb + ensureDatabases/Users.
-    redis.nix                   # services.redis – Redis with config generation.
     cron.nix                    # services.cron – Scheduled tasks via supercronic.
     grafana-alloy.nix           # services.grafana-alloy – metrics agent (prometheus scrape/remote-write).
     tailscale-ssh.nix           # services.tailscale-ssh – Tailscale VPN + Dropbear SSH access.
@@ -66,10 +69,17 @@ User config  -->  evalModules  -->  evaluated config  -->  mkS6RcImage  -->  OCI
 - **Base module** (`modules/default.nix`): Defines the core option tree that maps
   1:1 to `mkS6RcImage` arguments:
   - `image.name`, `image.tag`, `image.user`
+  - `image.labels` (OCI labels, e.g. `org.opencontainers.image.source`)
+  - `image.exposedPorts` (list of port ints -> OCI EXPOSE)
+  - `image.volumes` (list of path strings -> OCI volume mount points)
+  - `image.healthcheck.{enable, command, interval, timeout, retries, startPeriod}`
   - `environment` (attrset of env vars)
   - `packages` (list of packages -> `/usr/local/bin`)
   - `copyToRoot` (extra rootfs store paths)
   - `files` (list of `{ source, target }`)
+  - `secrets` (runtime secrets: `secrets.<name>.{file, envVar}`, defaults to
+    `/run/secrets/<name>`, optional contenv integration)
+  - `initScripts` (named oneshot scripts that run before all services)
   - `s6Services` (attrset of s6-rc service specs -- internal, populated by
     service modules)
 
@@ -167,8 +177,6 @@ store paths that npins' `fetchTarball`/`fetchzip` would produce.
 |--------------------------|----------------------------------------------------------------|
 | `services.nginx`         | `virtualHosts.<name>.locations.<path>.proxyPass`, `upstreams`  |
 | `services.caddy`         | `virtualHosts.<name>.extraConfig`, `globalConfig`              |
-| `services.postgresql`    | `ensureDatabases`, `ensureUsers`, `dataDir`, `port`            |
-| `services.redis`         | `maxMemory`, `maxMemoryPolicy`, `appendOnly`, `port`           |
 | `services.cron`          | `jobs.<name>.{schedule, command}`                              |
 | `services.grafana-alloy` | `configFile` or `configText`, `postgres.customQueries`         |
 | `services.tailscale-ssh` | `loginServer`, `advertiseExitNode`, `sshPort`, `extraPackages` |
@@ -193,13 +201,6 @@ generates a `Caddyfile` from `virtualHosts`. Both support raw config escape hatc
           upstreams.app.servers."127.0.0.1:3000" = {};
           virtualHosts.localhost.locations."/".proxyPass = "http://app";
         };
-
-        services.postgresql = {
-          enable = true;
-          ensureDatabases = [ "myapp" ];
-        };
-
-        services.redis.enable = true;
       };
   };
 }
@@ -211,7 +212,7 @@ See `examples/` for complete, self-contained flakes:
 
 - **`nginx-static/`** -- Minimal nginx serving a static HTML site.
 - **`reverse-proxy/`** -- nginx reverse proxy with upstreams + a custom s6 app service.
-- **`monitored-app/`** -- Full-stack: nginx + postgres + redis + alloy + cron + tailscale.
+- **`monitored-app/`** -- Full-stack: nginx + alloy + cron + tailscale.
 
 ## Supported platforms
 

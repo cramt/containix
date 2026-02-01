@@ -465,6 +465,21 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = lib.concatLists (lib.mapAttrsToList (name: vhost:
+      let hasSSL = vhost.onlySSL || vhost.addSSL || vhost.forceSSL; in
+      lib.optional (hasSSL && vhost.sslCertificate == null) {
+        assertion = false;
+        message = "services.nginx.virtualHosts.${name}: SSL is enabled but sslCertificate is not set.";
+      }
+      ++ lib.optional (hasSSL && vhost.sslCertificateKey == null) {
+        assertion = false;
+        message = "services.nginx.virtualHosts.${name}: SSL is enabled but sslCertificateKey is not set.";
+      }
+    ) cfg.virtualHosts);
+
+    # Auto-expose the default listen ports.
+    image.exposedPorts = lib.mkDefault [ cfg.defaultHTTPListenPort ];
+
     packages = [ cfg.package ];
 
     files = [

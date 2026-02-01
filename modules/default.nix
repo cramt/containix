@@ -1,5 +1,5 @@
 # Base module: core options that map directly to mkS6RcImage arguments.
-{ lib, ... }:
+{ lib, config, ... }:
 
 {
   options = {
@@ -19,6 +19,65 @@
         type = lib.types.str;
         default = "1000:1000";
         description = "User:group the container runs as.";
+      };
+
+      labels = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = {};
+        description = "OCI image labels (e.g. maintainer, version, source URL).";
+        example = {
+          "org.opencontainers.image.source" = "https://github.com/cramt/containix";
+          "org.opencontainers.image.version" = "1.0.0";
+        };
+      };
+
+      exposedPorts = lib.mkOption {
+        type = lib.types.listOf lib.types.port;
+        default = [];
+        description = "Ports to expose in OCI image metadata (EXPOSE).";
+        example = [ 80 443 8080 ];
+      };
+
+      volumes = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "Volume mount points to declare in OCI image metadata.";
+        example = [ "/data" "/var/log" ];
+      };
+
+      healthcheck = {
+        enable = lib.mkEnableOption "OCI healthcheck";
+
+        command = lib.mkOption {
+          type = lib.types.str;
+          default = "";
+          description = "Healthcheck command to run inside the container.";
+          example = "curl -sf http://localhost:8080/health";
+        };
+
+        interval = lib.mkOption {
+          type = lib.types.str;
+          default = "30s";
+          description = "Time between healthcheck runs (Go duration, e.g. 30s, 1m).";
+        };
+
+        timeout = lib.mkOption {
+          type = lib.types.str;
+          default = "10s";
+          description = "Max time a healthcheck can run before being killed.";
+        };
+
+        retries = lib.mkOption {
+          type = lib.types.int;
+          default = 3;
+          description = "Number of consecutive failures before marking unhealthy.";
+        };
+
+        startPeriod = lib.mkOption {
+          type = lib.types.str;
+          default = "5s";
+          description = "Grace period after start before healthchecks count.";
+        };
       };
     };
 
@@ -57,6 +116,79 @@
       description = "Extra files to copy into the image.";
     };
 
+    secrets = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: {
+        options = {
+          file = lib.mkOption {
+            type = lib.types.str;
+            description = "Path where the secret file is mounted at runtime.";
+            default = "/run/secrets/${name}";
+          };
+
+          envVar = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = ''
+              If set, an init script will read the secret file and export its
+              contents as this environment variable via s6 contenv.
+            '';
+          };
+        };
+      }));
+      default = {};
+      description = ''
+        Runtime secrets expected to be mounted into the container.
+        Compatible with Docker secrets (/run/secrets/), Kubernetes secret
+        volumes, and Podman secrets. Each secret declares a file path and
+        optionally an environment variable to populate from it.
+      '';
+      example = {
+        db-password = {
+          file = "/run/secrets/db-password";
+          envVar = "DATABASE_PASSWORD";
+        };
+        api-key = {
+          file = "/run/secrets/api-key";
+          envVar = "API_KEY";
+        };
+      };
+    };
+
+    initScripts = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      description = ''
+        Named init scripts that run as oneshot s6-rc services before all other
+        services start. Use for directory creation, permission fixes, config
+        templating, etc. Each script runs with contenv (environment variables
+        are available).
+      '';
+      example = {
+        setup-dirs = ''
+          mkdir -p /data/logs /data/cache
+          chown 1000:1000 /data/logs /data/cache
+        '';
+      };
+    };
+
+    # NixOS-compatible assertions. Service modules can append to this list.
+    # Each assertion is { assertion = bool; message = "..."; }.
+    # Evaluated at build time; failing assertions abort with a clear error.
+    assertions = lib.mkOption {
+      type = lib.types.listOf lib.types.unspecified;
+      default = [];
+      internal = true;
+      description = "List of { assertion, message } checked at evaluation time.";
+    };
+
+    # NixOS-compatible warnings. Collected and printed but don't abort.
+    warnings = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      internal = true;
+      description = "List of warning messages printed during evaluation.";
+    };
+
     # Internal option: service modules append to this.
     # Maps directly to mkS6RcImage's `services` argument.
     s6Services = lib.mkOption {
@@ -92,5 +224,14 @@
       default = {};
       description = "s6-rc service definitions. Populated by service modules.";
     };
+  };
+
+  config = {
+    assertions = [
+      {
+        assertion = !config.image.healthcheck.enable || config.image.healthcheck.command != "";
+        message = "image.healthcheck.enable is true but image.healthcheck.command is empty.";
+      }
+    ];
   };
 }

@@ -1,4 +1,4 @@
-# Full-stack example: nginx + postgres + redis + alloy metrics + cron + tailscale SSH.
+# Full-stack example: nginx + alloy metrics + cron + tailscale SSH.
 #
 # Demonstrates using most containix services together in a single container.
 {
@@ -35,22 +35,6 @@
             tryFiles = "$uri =404";
           };
         };
-      };
-
-      # --- postgresql: application database ---
-      services.postgresql = {
-        enable = true;
-        ensureDatabases = [ "myapp" ];
-        ensureUsers = [ "myapp" ];
-        maxConnections = 50;
-        sharedBuffers = "256MB";
-      };
-
-      # --- redis: caching / sessions ---
-      services.redis = {
-        enable = true;
-        maxMemory = "128mb";
-        maxMemoryPolicy = "allkeys-lru";
       };
 
       # --- grafana-alloy: metrics collection ---

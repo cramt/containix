@@ -100,6 +100,10 @@ in
 , extraPaths ? []            # packages whose /bin/* should appear in /usr/local/bin
 , extraFiles ? []            # [{ source = ./file; target = "etc/foo"; }]
 , services ? {}              # s6-rc services graph
+, labels ? {}                # OCI labels
+, exposedPorts ? []          # list of port ints -> OCI ExposedPorts
+, volumes ? []               # list of path strings -> OCI Volumes
+, healthcheck ? null         # { command, interval, timeout, retries, startPeriod } or null
 }:
 
 let
@@ -155,6 +159,43 @@ let
 
   envList = mkEnvList env;
 
+  # Convert a Go-style duration string (e.g. "30s", "1m", "500ms") to nanoseconds.
+  # OCI Healthcheck uses nanosecond integers.
+  parseDuration = s:
+    let
+      m = builtins.match "([0-9]+)(ms|s|m|h)" s;
+      value = if m != null then lib.toInt (builtins.elemAt m 0) else throw "parseDuration: invalid duration '${s}'";
+      unit = if m != null then builtins.elemAt m 1 else "";
+      multiplier =
+        if unit == "ms" then 1000000
+        else if unit == "s" then 1000000000
+        else if unit == "m" then 60000000000
+        else if unit == "h" then 3600000000000
+        else throw "parseDuration: unknown unit '${unit}'";
+    in value * multiplier;
+
+  # OCI ExposedPorts is a map of "port/tcp" -> {}
+  exposedPortsConfig =
+    if exposedPorts == [] then {}
+    else lib.listToAttrs (map (p: lib.nameValuePair "${toString p}/tcp" {}) exposedPorts);
+
+  # OCI Volumes is a map of "/path" -> {}
+  volumesConfig =
+    if volumes == [] then {}
+    else lib.listToAttrs (map (v: lib.nameValuePair v {}) volumes);
+
+  healthcheckConfig =
+    if healthcheck == null then {}
+    else {
+      Healthcheck = {
+        Test = [ "CMD-SHELL" healthcheck.command ];
+        Interval = parseDuration healthcheck.interval;
+        Timeout = parseDuration healthcheck.timeout;
+        Retries = healthcheck.retries;
+        StartPeriod = parseDuration healthcheck.startPeriod;
+      };
+    };
+
 in
 nix2containerPkgs.nix2container.buildImage {
   inherit name tag;
@@ -162,8 +203,12 @@ nix2containerPkgs.nix2container.buildImage {
   copyToRoot = [ rootfs usrLocal ] ++ copyToRoot;
 
   config = {
-    Entrypoint = [ "/init" ];  # s6-overlay PID 1 [1](https://discourse.nixos.org/t/how-to-run-a-dockertools-built-image-with-virtualisation-oci-containers-containers/62410)
+    Entrypoint = [ "/init" ];
     Env = envList ++ [ "PATH=/usr/local/bin:/command:/usr/bin:/bin" ];
-    User = user;               # Scaleway non-root [2](https://minin.tech/posts/docker-containers-priviliged-unpriviliged-rootless/)[3](https://gist.github.com/pinkeen/bba0a6790fec96d6c8de84bd824ad933)
-  };
+    User = user;
+  }
+  // (if labels != {} then { Labels = labels; } else {})
+  // (if exposedPorts != [] then { ExposedPorts = exposedPortsConfig; } else {})
+  // (if volumes != [] then { Volumes = volumesConfig; } else {})
+  // healthcheckConfig;
 }
