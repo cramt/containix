@@ -491,6 +491,9 @@ in
       run = ''
         exec ${cfg.package}/bin/nginx -c /etc/nginx/nginx.conf
       '';
+      # nginx uses SIGQUIT for graceful shutdown (finish serving requests)
+      stopSignal = "SIGQUIT";
+      stopTimeout = 10000;  # 10s to finish in-flight requests
     };
   };
 }

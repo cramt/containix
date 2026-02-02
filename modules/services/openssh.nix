@@ -179,14 +179,26 @@ in
     # Auto-expose SSH port
     image.exposedPorts = lib.mkDefault [ cfg.port ];
 
+    # sshd requires a privilege separation user
+    image.users.sshd = {
+      uid = 74;
+      gid = 74;
+      home = "/var/empty";
+      shell = "/usr/sbin/nologin";
+      description = "sshd privsep";
+    };
+    image.groups.sshd = { gid = 74; };
+
     packages = [ cfg.package ];
 
     files = [
       { source = sshdConfig; target = "etc/ssh/sshd_config"; }
     ];
 
-    # Generate host keys before starting sshd
+    # Generate host keys and set up privsep dir before starting sshd
     initScripts.openssh-hostkeys = ''
+      mkdir -p /var/empty
+      chmod 755 /var/empty
       ${initHostKeys}
     '';
 

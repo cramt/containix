@@ -40,11 +40,8 @@
             };
           };
         });
-        default = {
-          root = { uid = 0; gid = 0; home = "/root"; shell = "/bin/sh"; };
-          nobody = { uid = 65534; gid = 65534; home = "/nonexistent"; shell = "/usr/sbin/nologin"; };
-        };
-        description = "Users to create in /etc/passwd.";
+        default = {};
+        description = "Users to create in /etc/passwd. root and nobody are always included.";
       };
 
       groups = lib.mkOption {
@@ -53,12 +50,8 @@
             gid = lib.mkOption { type = lib.types.int; };
           };
         });
-        default = {
-          root = { gid = 0; };
-          nogroup = { gid = 65534; };
-          nobody = { gid = 65534; };
-        };
-        description = "Groups to create in /etc/group.";
+        default = {};
+        description = "Groups to create in /etc/group. root, nogroup, and nobody are always included.";
       };
 
       labels = lib.mkOption {
@@ -273,6 +266,63 @@
             default = [];
             description = "Services this one depends on.";
           };
+          stopSignal = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "SIGQUIT";
+            description = ''
+              Signal to send when stopping the service (longrun only).
+              Default is SIGTERM. Some services (e.g. nginx) prefer SIGQUIT
+              for graceful shutdown.
+            '';
+          };
+          stopTimeout = lib.mkOption {
+            type = lib.types.nullOr lib.types.int;
+            default = null;
+            example = 10000;
+            description = ''
+              Milliseconds to wait after sending the stop signal before
+              sending SIGKILL (longrun only). Default is s6's built-in
+              timeout (typically 5000ms).
+            '';
+          };
+          logging = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Enable s6-log for this service (longrun only). When enabled,
+                stdout/stderr are piped through s6-log which writes to a
+                dedicated log directory with automatic rotation.
+                When disabled (default), output goes to the container's
+                stdout/stderr (container best practice).
+              '';
+            };
+            directory = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = ''
+                Log directory for this service. Defaults to /var/log/s6/<service-name>.
+                Only used when logging.enable is true.
+              '';
+            };
+            maxSize = lib.mkOption {
+              type = lib.types.int;
+              default = 1000000;
+              description = ''
+                Maximum size of each log file in bytes before rotation.
+                Default is 1MB. Only used when logging.enable is true.
+              '';
+            };
+            maxFiles = lib.mkOption {
+              type = lib.types.int;
+              default = 10;
+              description = ''
+                Number of rotated log files to keep.
+                Only used when logging.enable is true.
+              '';
+            };
+          };
         };
       });
       default = {};
@@ -281,6 +331,18 @@
   };
 
   config = {
+    # Default users and groups that are always present.
+    # Using config (not default) so they merge with user-defined entries.
+    image.users = {
+      root = lib.mkDefault { uid = 0; gid = 0; home = "/root"; shell = "/bin/sh"; description = "root"; };
+      nobody = lib.mkDefault { uid = 65534; gid = 65534; home = "/nonexistent"; shell = "/usr/sbin/nologin"; description = "nobody"; };
+    };
+    image.groups = {
+      root = lib.mkDefault { gid = 0; };
+      nogroup = lib.mkDefault { gid = 65534; };
+      nobody = lib.mkDefault { gid = 65534; };
+    };
+
     assertions = [
       {
         assertion = !config.image.healthcheck.enable || config.image.healthcheck.command != "";

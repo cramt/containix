@@ -15,13 +15,13 @@ It serves as the issue tracker for AI-assisted development sessions.
 
 Stateless services, proxies, sidecars, agents -- things that belong in containers.
 
-- [ ] 2.1 `services.openssh` -- SSH/SFTP server
-- [ ] 2.2 `services.dnsmasq` -- lightweight DNS/DHCP sidecar
-- [ ] 2.3 `services.vector` -- log/metrics shipping agent
-- [ ] 2.4 `services.haproxy` -- TCP/HTTP load balancer
-- [ ] 2.5 `services.prometheus-node-exporter` -- metrics exporter sidecar
-- [ ] 2.6 `services.wireguard` -- VPN tunnel
-- [ ] 2.7 `services.unbound` -- recursive DNS resolver
+- [x] 2.1 `services.openssh` -- SSH/SFTP server (+ integration test)
+- [x] 2.2 `services.dnsmasq` -- lightweight DNS/DHCP sidecar
+- [x] 2.3 `services.vector` -- log/metrics shipping agent
+- [x] 2.4 `services.haproxy` -- TCP/HTTP load balancer
+- [x] 2.5 `services.prometheus-node-exporter` -- metrics exporter sidecar
+- [x] 2.6 `services.wireguard` -- VPN tunnel
+- [x] 2.7 `services.unbound` -- recursive DNS resolver
 
 ## Phase 3: Core Framework Improvements
 
@@ -32,16 +32,13 @@ Stateless services, proxies, sidecars, agents -- things that belong in container
 - [x] 3.5 Secrets handling -- runtime secrets from mounted files (with contenv integration)
 - [ ] 3.6 Multi-layer control -- expose nix2container layer options
 - [x] 3.7 `image.labels` -- OCI labels (maintainer, version, source URL)
-- [ ] 3.8 Declarative rootfs static files -- /etc/passwd, /bin/sh, /run etc. should be driven by module options instead of ad-hoc shell in mk-s6rc-image.nix
-- [ ] 3.9 Non-root user support -- `image.users` option to declare users/groups with home dirs, passwd entries. Currently `image.user` sets the OCI User but there's no passwd entry or home dir for non-root UIDs.
-- [ ] 3.10 Graceful shutdown -- per-service stop timeout, stop signal config. s6-overlay handles SIGTERM but there's no way to configure shutdown behaviour per service.
-- [ ] 3.11 Logging strategy -- design how logging works end-to-end. Questions to answer:
-  - s6 captures stdout/stderr per service -- should we expose s6-log options (rotation, max size)?
-  - Should there be a per-service `logging = "stdout" | "file" | "none"` option?
-  - How does this interact with log shippers like vector/alloy?
-  - Some services (nginx) want to log to files by default -- should we redirect those to stdout?
-  - Container best practice is stdout-only, but some users want persistent logs in a volume.
-  - Consider: `s6Services.<name>.logging.enable`, `s6Services.<name>.logging.maxSize`, `s6Services.<name>.logging.rotate`
+- [x] 3.8 Declarative rootfs -- mk-s6rc-image.nix rewritten from imperative shell (cat/echo/heredoc) to pure Nix derivations. s6-rc tree, /etc/passwd, /etc/group, /usr/local/bin symlinks all built as separate derivations and assembled via a single rootfs runCommand that only does cp/ln/mkdir.
+- [x] 3.9 Non-root user support -- `image.users`/`image.groups` options wired through to mk-s6rc-image.nix. Generates /etc/passwd and /etc/group from declared users. Home dirs auto-created. Also wired `image.shell` and `image.basePackages` through.
+- [x] 3.10 Graceful shutdown -- `s6Services.<name>.stopSignal` and `s6Services.<name>.stopTimeout` options. Generates s6 `down-signal` and `timeout-kill` files. nginx defaults to SIGQUIT/10s, haproxy to SIGUSR1/30s.
+- [x] 3.11 Logging strategy -- `s6Services.<name>.logging.{enable, directory, maxSize, maxFiles}`. Default is stdout (container best practice). When enabled, pipes through s6-log with rotation. Design decisions:
+  - Default: stdout-only (container best practice, works with docker logs / kubectl logs)
+  - Opt-in: per-service s6-log with configurable rotation (for users who want persistent logs in volumes)
+  - Log shippers (vector/alloy) can consume either stdout or log files
 
 ## Phase 4: Testing and CI
 
@@ -90,20 +87,56 @@ Stateless services, proxies, sidecars, agents -- things that belong in container
 - Added `services.openssh` module (eval-tested, not yet integration-tested)
 - Added 3.8 to plan: declarative rootfs static files
 
+### Session 3 (2026-02-02)
+- **Phase 2 COMPLETE**: All 7 service modules implemented and eval-tested
+  - `services.openssh` -- SSH/SFTP server with privsep user, host key generation, pubkey/password auth
+  - `services.dnsmasq` -- DNS/DHCP sidecar with structured config (servers, addresses, DHCP ranges)
+  - `services.vector` -- log/metrics agent with sources/transforms/sinks config
+  - `services.haproxy` -- TCP/HTTP load balancer with frontends/backends/stats/ACLs
+  - `services.prometheus-node-exporter` -- metrics exporter with collector enable/disable
+  - `services.wireguard` -- VPN tunnel with peers, key management, capability warnings
+  - `services.unbound` -- recursive DNS resolver with DNSSEC, forwarding, caching
+- **openssh integration-tested**: 3 assertions (SSH connect, remote exec, SFTP subsystem)
+  - Fixed: sshd privsep user (`image.users.sshd`), `/var/empty` chroot dir
+  - Fixed: authorized_keys permissions (staging mount + initScript copy)
+  - Fixed: SSH test never prompts (BatchMode=yes, IdentitiesOnly=yes, unset SSH_AUTH_SOCK)
+- **Framework improvements**:
+  - 3.9 Non-root user support: `image.users`/`image.groups` wired through to mk-s6rc-image.nix. Default users (root, nobody) set via config block so they merge with module-defined users. Home dirs auto-created.
+  - 3.10 Graceful shutdown: `s6Services.<name>.stopSignal` and `stopTimeout`. nginx defaults to SIGQUIT/10s, haproxy to SIGUSR1/30s.
+  - 3.11 Logging: `s6Services.<name>.logging.{enable, directory, maxSize, maxFiles}`. Default stdout (container best practice), opt-in s6-log with rotation.
+  - Wired `image.shell` and `image.basePackages` through mkContainer -> mkS6RcImage (no longer hardcoded).
+- **Test results**: 13 eval checks pass, 16 integration test assertions pass (7 test images)
+- **Critical bug fixed**: `image.users` default attrset was being replaced (not merged) when service modules added users. Moved defaults to `config` block with `lib.mkDefault`.
+
+### Session 4 (2026-02-02)
+- **3.8 Declarative rootfs COMPLETE**: `mk-s6rc-image.nix` fully rewritten
+  - `mkS6RcTreeDrv`: Pure Nix s6-rc service tree builder. Each file (type, deps, run, up, down-signal, timeout-kill, log/run) is a `pkgs.writeText` or `pkgs.writeScript`. Assembled via `runCommand` with only cp/mkdir/chmod.
+  - `mkPasswd`/`mkGroup`: Pure `writeText` derivations for /etc/passwd and /etc/group.
+  - `mkUsrLocalBin`: Derivation that creates /usr/local/bin symlinks for user packages.
+  - `rootfs`: Single `runCommand` that overlays all pieces (s6-overlay tarballs, s6-rc tree, passwd/group, structural dirs, shell symlinks, base packages, extra files). No content generation -- only filesystem assembly.
+  - **Permission bug fixed**: s6-overlay tarballs create dirs with `dr-xr-xr-x` (555). Solution: `cp -r --preserve=mode,timestamps --no-preserve=ownership` to keep execute bits while ensuring builder owns files, then `chmod -R u+w "$out"` after each overlay step. The second `chmod` is critical because `cp --preserve=mode` resets directory permissions from the source tree.
+- **AGENT.md updated**: Added testing rules section requiring `nix flake check` and `nix run .#integration-test` before considering work done.
+- **All tests pass**: 13 eval checks, 16 integration test assertions (7 test images)
+
 ## Summary of What's Done
 
-Core framework is now **actually tested and working**:
+Core framework is **tested and working** with a full service module ecosystem:
+- **12 service modules**: nginx, caddy, cron, grafana-alloy, tailscale-ssh, openssh, dnsmasq, vector, haproxy, prometheus-node-exporter, wireguard, unbound
 - OCI metadata: labels, exposedPorts, volumes, healthcheck
 - Runtime secrets with contenv integration (Docker/K8s compatible)
 - Init scripts for pre-service setup
+- Declarative users/groups with auto-generated /etc/passwd, /etc/group
+- Declarative rootfs: pure Nix derivations for s6-rc tree, passwd/group, symlinks
+- Graceful shutdown: per-service stop signal and timeout
+- Per-service logging: opt-in s6-log with rotation
 - NixOS-style assertions and warnings
-- Integration tests: `nix run .#integration-test` (13 passing assertions)
-- Eval checks: `nix flake check` (7 configs)
+- Integration tests: `nix run .#integration-test` (16 passing assertions, 7 test images)
+- Eval checks: `nix flake check` (13 configs)
 - GitHub Actions CI with eval + integration test jobs
 - Flake template for quick start
 - Dev shell for contributors
 
 Next priorities:
-1. New service modules (openssh, dnsmasq, vector, haproxy, etc.)
-2. Option docs generation (auto-generate from module options)
-3. Declarative rootfs (3.8)
+1. Option docs generation (auto-generate from module options) (5.3)
+2. Multi-layer control (3.6) -- expose nix2container layer options
+3. Ecosystem integration: Docker Compose generation, K8s manifests (6.x)

@@ -110,13 +110,23 @@
           ) evaluated.initScripts;
 
           # Add initScript dependencies to all user-defined services.
-          userServices = lib.mapAttrs (_: svc:
+          userServices = lib.mapAttrs (name: svc:
             { inherit (svc) kind;
               after = svc.after ++ initServiceNames;
             }
             // lib.optionalAttrs (svc.run != null) { inherit (svc) run; }
             // lib.optionalAttrs (svc.up != null) { inherit (svc) up; }
             // lib.optionalAttrs (svc.down != null) { inherit (svc) down; }
+            // lib.optionalAttrs (svc.stopSignal != null) { inherit (svc) stopSignal; }
+            // lib.optionalAttrs (svc.stopTimeout != null) { inherit (svc) stopTimeout; }
+            // lib.optionalAttrs svc.logging.enable {
+              logging = {
+                enable = true;
+                directory = if svc.logging.directory != "" then svc.logging.directory else "/var/log/s6/${name}";
+                maxSize = svc.logging.maxSize;
+                maxFiles = svc.logging.maxFiles;
+              };
+            }
           ) evaluated.s6Services;
         in
         mkS6RcImage {
@@ -130,6 +140,10 @@
           labels = evaluated.image.labels;
           exposedPorts = evaluated.image.exposedPorts;
           volumes = evaluated.image.volumes;
+          users = evaluated.image.users;
+          groups = evaluated.image.groups;
+          shell = evaluated.image.shell;
+          basePackages = evaluated.image.basePackages;
           healthcheck =
             if evaluated.image.healthcheck.enable then {
               command = evaluated.image.healthcheck.command;
@@ -308,7 +322,32 @@
           };
         };
 
-        # Test 6: secrets with contenv integration
+        # Test 6: openssh server
+        test-openssh = mkContainer {
+          image.name = "containix-test-openssh";
+          image.tag = "test";
+          image.user = "root";
+
+          services.openssh = {
+            enable = true;
+            port = 22;
+            permitRootLogin = "yes";
+            passwordAuthentication = false;
+            pubkeyAuthentication = true;
+          };
+
+          # Copy authorized_keys from mounted volume with correct permissions
+          initScripts.setup-ssh-keys = ''
+            mkdir -p /root/.ssh
+            chmod 700 /root/.ssh
+            if [ -f /tmp/ssh-pubkey/authorized_keys ]; then
+              cp /tmp/ssh-pubkey/authorized_keys /root/.ssh/authorized_keys
+              chmod 600 /root/.ssh/authorized_keys
+            fi
+          '';
+        };
+
+        # Test 7: secrets with contenv integration
         test-secrets = let
           secretServer = pkgs.writeText "secret-server.py" ''
             import http.server, os, socketserver
@@ -360,12 +399,12 @@
           images = {
             inherit (self.packages.${system})
               test-nginx-static test-reverse-proxy test-env-init
-              test-metadata test-caddy test-secrets;
+              test-metadata test-caddy test-openssh test-secrets;
           };
           copyScripts = lib.mapAttrs (_: img: img.copyToDockerDaemon) images;
           testScript = pkgs.writeShellApplication {
             name = "containix-integration-test";
-            runtimeInputs = with pkgs; [ curl jq docker ];
+            runtimeInputs = with pkgs; [ curl jq docker openssh ];
             text = ''
               set -euo pipefail
 
@@ -375,6 +414,7 @@
               COPY_ENV="${copyScripts.test-env-init}/bin/copy-to-docker-daemon"
               COPY_META="${copyScripts.test-metadata}/bin/copy-to-docker-daemon"
               COPY_CADDY="${copyScripts.test-caddy}/bin/copy-to-docker-daemon"
+              COPY_OPENSSH="${copyScripts.test-openssh}/bin/copy-to-docker-daemon"
               COPY_SECRETS="${copyScripts.test-secrets}/bin/copy-to-docker-daemon"
 
               # ── helpers ──
@@ -495,6 +535,75 @@
                 docker rm -f "$cid" &>/dev/null || true
               }
 
+              # ── test: openssh ──
+              test_openssh() {
+                local t="openssh"
+                log "=== $t ==="
+                load "$t" "$COPY_OPENSSH"
+
+                # Generate a temporary SSH key pair for testing
+                local keydir; keydir=$(mktemp -d)
+                ssh-keygen -t ed25519 -f "$keydir/test_key" -N "" -q
+
+                # Disable SSH agent so it never prompts for GPG/passphrase
+                unset SSH_AUTH_SOCK
+
+                # Common SSH options: never prompt, never use agent, only use our key
+                local -a SSH_COMMON=(
+                  -o StrictHostKeyChecking=no
+                  -o UserKnownHostsFile=/dev/null
+                  -o BatchMode=yes
+                  -o IdentitiesOnly=yes
+                  -o ConnectTimeout=2
+                  -i "$keydir/test_key"
+                )
+                local -a SSH_OPTS=("''${SSH_COMMON[@]}" -p 18085)
+                local -a SFTP_OPTS=("''${SSH_COMMON[@]}" -P 18085)
+
+                # Start the container with the public key mounted to a staging dir
+                # (the initScript copies it with correct permissions)
+                local cid; cid=$(docker run -d --name "cix-openssh-$$" -p 18085:22 \
+                  -v "$keydir/test_key.pub:/tmp/ssh-pubkey/authorized_keys:ro" \
+                  containix-test-openssh:test)
+                CONTAINERS+=("$cid")
+
+                # Wait for sshd to be ready (poll with ssh)
+                local i=0 max=30
+                while [ "$i" -lt "$max" ]; do
+                  if ssh "''${SSH_OPTS[@]}" root@localhost "echo SSH_OK" 2>/dev/null | grep -q "SSH_OK"; then
+                    break
+                  fi
+                  sleep 1; i=$((i + 1))
+                done
+
+                if [ "$i" -ge "$max" ]; then
+                  fail "$t" "sshd not ready in ''${max}s"
+                  docker logs "$cid" 2>&1 | tail -30
+                  rm -rf "$keydir"
+                  return
+                fi
+
+                # Test 1: SSH connection works
+                local out; out=$(ssh "''${SSH_OPTS[@]}" root@localhost "echo SSH_CONNECT_OK" 2>/dev/null)
+                if [ "$out" = "SSH_CONNECT_OK" ]; then pass "$t: SSH connection"
+                else fail "$t: SSH connection" "got: $out"; fi
+
+                # Test 2: can run commands via SSH
+                out=$(ssh "''${SSH_OPTS[@]}" root@localhost "whoami" 2>/dev/null)
+                if [ "$out" = "root" ]; then pass "$t: remote command exec"
+                else fail "$t: remote command exec" "got: $out"; fi
+
+                # Test 3: SFTP subsystem works
+                if echo "ls /" | sftp "''${SFTP_OPTS[@]}" root@localhost &>/dev/null; then
+                  pass "$t: SFTP subsystem"
+                else
+                  fail "$t: SFTP subsystem" "sftp connection failed"
+                fi
+
+                docker rm -f "$cid" &>/dev/null || true
+                rm -rf "$keydir"
+              }
+
               # ── test: secrets ──
               test_secrets() {
                 local t="secrets"
@@ -526,6 +635,7 @@
               test_env_init
               test_metadata
               test_caddy
+              test_openssh
               test_secrets
 
               echo ""
@@ -625,6 +735,87 @@
           services.nginx = {
             enable = true;
             virtualHosts.localhost.locations."/".return = "200 ok";
+          };
+        };
+
+        # dnsmasq.
+        eval-dnsmasq = checkConfig "dnsmasq" {
+          image.name = "check-dnsmasq";
+          services.dnsmasq = {
+            enable = true;
+            servers = [ "1.1.1.1" "8.8.8.8" ];
+            addresses = [
+              { name = "myapp.local"; address = "127.0.0.1"; }
+            ];
+          };
+        };
+
+        # vector.
+        eval-vector = checkConfig "vector" {
+          image.name = "check-vector";
+          services.vector = {
+            enable = true;
+            sources.demo = ''
+              type = "demo_logs"
+              format = "json"
+            '';
+            sinks.stdout = ''
+              type = "console"
+              inputs = ["demo"]
+              encoding.codec = "json"
+            '';
+          };
+        };
+
+        # haproxy.
+        eval-haproxy = checkConfig "haproxy" {
+          image.name = "check-haproxy";
+          services.haproxy = {
+            enable = true;
+            frontends.http = {
+              bind = "*:80";
+              defaultBackend = "app";
+            };
+            backends.app = {
+              servers = [ "app1 127.0.0.1:3000 check" ];
+            };
+          };
+        };
+
+        # prometheus-node-exporter.
+        eval-node-exporter = checkConfig "node-exporter" {
+          image.name = "check-node-exporter";
+          services.prometheus-node-exporter = {
+            enable = true;
+            port = 9100;
+          };
+        };
+
+        # wireguard.
+        eval-wireguard = checkConfig "wireguard" {
+          image.name = "check-wireguard";
+          services.wireguard = {
+            enable = true;
+            address = "10.0.0.1/24";
+            listenPort = 51820;
+            peers = [
+              {
+                publicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+                allowedIPs = [ "10.0.0.0/24" ];
+                endpoint = "vpn.example.com:51820";
+              }
+            ];
+          };
+        };
+
+        # unbound.
+        eval-unbound = checkConfig "unbound" {
+          image.name = "check-unbound";
+          services.unbound = {
+            enable = true;
+            forwardZones."." = {
+              forwardAddrs = [ "1.1.1.1" "1.0.0.1" ];
+            };
           };
         };
 
