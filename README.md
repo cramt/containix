@@ -39,9 +39,7 @@ Create a `flake.nix`:
           virtualHosts.localhost.locations."/".root = "/var/www";
         };
 
-        files = [
-          { source = ./static; target = "var/www"; }
-        ];
+        files."var/www".source = ./static;
       };
   };
 }
@@ -62,6 +60,7 @@ See the [`examples/`](./examples) directory for complete working examples:
 - **[nginx-static](./examples/nginx-static)** — Minimal nginx serving static files
 - **[reverse-proxy](./examples/reverse-proxy)** — nginx reverse proxy with custom application service
 - **[monitored-app](./examples/monitored-app)** — Full-stack setup with nginx, Grafana Alloy, cron, and Tailscale
+- **[openssh-server](./examples/openssh-server)** — SSH server with host key generation and pubkey auth
 
 ## API Reference
 
@@ -110,15 +109,23 @@ List of packages to make available in `/usr/local/bin`:
 packages = [ pkgs.curl pkgs.jq ];
 ```
 
-#### `files`
+#### `files.*`
 
-Copy files into the image:
+Declarative file definitions (NixOS `environment.etc` style). Each attribute name
+is the target path relative to `/`:
 
 ```nix
-files = [
-  { source = ./config.yml; target = "etc/app/config.yml"; }
-  { source = pkgs.writeText "motd" "Welcome!"; target = "etc/motd"; }
-];
+# From a source file or derivation:
+files."etc/app/config.yml".source = ./config.yml;
+
+# Inline text content (auto-creates a derivation):
+files."etc/motd".text = "Welcome to my container!";
+
+# With custom permissions:
+files."etc/app/config.yml" = {
+  source = ./config.yml;
+  mode = "0640";
+};
 ```
 
 #### `secrets.*`
@@ -320,11 +327,16 @@ in {
 
   config = lib.mkIf cfg.enable {
     packages = [ pkgs.myservice ];
-    
+
+    # Declarative config file (NixOS environment.etc style)
+    files."etc/myservice/config.yml".text = ''
+      port: ${toString cfg.port}
+    '';
+
     s6Services.myservice = {
       kind = "longrun";
       run = ''
-        exec myservice --port ${toString cfg.port}
+        exec myservice --config /etc/myservice/config.yml
       '';
     };
   };

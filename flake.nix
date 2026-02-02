@@ -136,7 +136,7 @@
           env = evaluated.environment;
           extraPaths = evaluated.packages;
           copyToRoot = evaluated.copyToRoot;
-          extraFiles = evaluated.files;
+          extraFiles = lib.filter (f: f.enable) (lib.attrValues evaluated.files);
           labels = evaluated.image.labels;
           exposedPorts = evaluated.image.exposedPorts;
           volumes = evaluated.image.volumes;
@@ -187,14 +187,9 @@
             };
           };
 
-          files = [
-            {
-              source = pkgs.writeText "index.html" ''
-                <!DOCTYPE html><html><body>CONTAINIX_TEST_OK</body></html>
-              '';
-              target = "srv/www/index.html";
-            }
-          ];
+          files."srv/www/index.html".text = ''
+            <!DOCTYPE html><html><body>CONTAINIX_TEST_OK</body></html>
+          '';
         };
 
         # Test 2: reverse proxy with upstream + health endpoint
@@ -270,9 +265,7 @@
 
           packages = [ pkgs.python3 ];
 
-          files = [
-            { source = envServer; target = "srv/env-server.py"; }
-          ];
+          files."srv/env-server.py".source = envServer;
 
           initScripts.create-marker = ''
             mkdir -p /tmp/init-test
@@ -376,9 +369,7 @@
 
           packages = [ pkgs.python3 ];
 
-          files = [
-            { source = secretServer; target = "srv/secret-server.py"; }
-          ];
+          files."srv/secret-server.py".source = secretServer;
 
           s6Services.secret-server = {
             kind = "longrun";

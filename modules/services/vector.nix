@@ -138,12 +138,8 @@ in
   config = lib.mkIf cfg.enable {
     packages = [ cfg.package ];
 
-    files = [
-      {
-        source = if cfg.configFile != null then cfg.configFile else vectorConfig;
-        target = "etc/vector/vector.toml";
-      }
-    ];
+    files."etc/vector/vector.toml".source =
+      if cfg.configFile != null then cfg.configFile else vectorConfig;
 
     s6Services.vector = {
       kind = "longrun";

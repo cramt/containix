@@ -147,20 +147,65 @@
     };
 
     files = lib.mkOption {
-      type = lib.types.listOf (lib.types.submodule {
+      type = lib.types.attrsOf (lib.types.submodule ({ name, config, options, ... }: {
         options = {
-          source = lib.mkOption {
-            type = lib.types.path;
-            description = "Source path (file or directory).";
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Whether this file should be generated.";
           };
+
           target = lib.mkOption {
             type = lib.types.str;
-            description = "Target path inside the image (relative to /).";
+            description = "Target path inside the image (relative to /). Defaults to the attribute name.";
+          };
+
+          text = lib.mkOption {
+            type = lib.types.nullOr lib.types.lines;
+            default = null;
+            description = "Text content of the file. Mutually exclusive with source.";
+          };
+
+          source = lib.mkOption {
+            type = lib.types.path;
+            description = "Source path (file or directory). If text is set, this is derived automatically.";
+          };
+
+          mode = lib.mkOption {
+            type = lib.types.str;
+            default = "0444";
+            example = "0644";
+            description = "File mode (octal string). Applied via chmod during rootfs assembly.";
           };
         };
-      });
-      default = [];
-      description = "Extra files to copy into the image.";
+
+        config = {
+          target = lib.mkDefault name;
+          source = lib.mkIf (config.text != null) (
+            let
+              safeName = "file-" + lib.replaceStrings [ "/" ] [ "-" ] name;
+            in
+            lib.mkDerivedConfig options.text (pkgs.writeText safeName)
+          );
+        };
+      }));
+      default = {};
+      example = lib.literalExpression ''
+        {
+          "etc/nginx/nginx.conf".source = nginxConf;
+          "srv/www/index.html".text = "<html><body>Hello</body></html>";
+          "etc/motd" = {
+            text = "Welcome to my container!";
+            mode = "0644";
+          };
+        }
+      '';
+      description = ''
+        Set of files to include in the container image.
+        Similar to NixOS environment.etc -- each attribute name is the target
+        path (relative to /), and you can provide either a source path/derivation
+        or inline text content.
+      '';
     };
 
     secrets = lib.mkOption {

@@ -24,9 +24,7 @@
         };
       };
 
-      files = [
-        { source = ./site; target = "srv/www"; }
-      ];
+      files."srv/www".source = ./site;
     };
   };
 }

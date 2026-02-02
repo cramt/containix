@@ -482,9 +482,7 @@ in
 
     packages = [ cfg.package ];
 
-    files = [
-      { source = nginxConf; target = "etc/nginx/nginx.conf"; }
-    ];
+    files."etc/nginx/nginx.conf".source = nginxConf;
 
     s6Services.nginx = {
       kind = "longrun";

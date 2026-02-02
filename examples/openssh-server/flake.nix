@@ -54,18 +54,13 @@
       image.volumes = [ "/etc/ssh" ];
       
       # Add a welcome message
-      files = [
-        {
-          source = pkgs.writeText "motd" ''
-            ╔═══════════════════════════════════════╗
-            ║   Welcome to Containix SSH Server    ║
-            ║                                       ║
-            ║   Built with Nix + s6-overlay        ║
-            ╚═══════════════════════════════════════╝
-          '';
-          target = "etc/motd";
-        }
-      ];
+      files."etc/motd".text = ''
+        ╔═══════════════════════════════════════╗
+        ║   Welcome to Containix SSH Server    ║
+        ║                                       ║
+        ║   Built with Nix + s6-overlay        ║
+        ╚═══════════════════════════════════════╝
+      '';
       
       # Set up authorized_keys from a mounted secret
       # In production, mount your public key at /run/secrets/authorized_keys

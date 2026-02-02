@@ -118,6 +118,17 @@ Stateless services, proxies, sidecars, agents -- things that belong in container
 - **AGENT.md updated**: Added testing rules section requiring `nix flake check` and `nix run .#integration-test` before considering work done.
 - **All tests pass**: 13 eval checks, 16 integration test assertions (7 test images)
 
+### Session 5 (2026-02-02)
+- **Declarative files option**: Rewrote `files` from a list of `{ source, target }` to a NixOS `environment.etc`-style attrset keyed by target path.
+  - `files."etc/foo".text = "..."` -- inline content, auto-creates `pkgs.writeText` derivation
+  - `files."etc/foo".source = ./file` -- path or derivation
+  - `files."etc/foo".mode = "0640"` -- file permissions (default `"0444"`)
+  - `files."etc/foo".enable = false` -- conditionally exclude files
+  - `target` defaults to the attribute name (like `environment.etc`)
+  - Uses `lib.mkDerivedConfig` for `text` -> `source` derivation (same pattern as NixOS)
+- **Updated all consumers**: 9 service modules, 2 examples, 3 test images, flake.nix bridge, README, AGENT.md
+- **All tests pass**: 13 eval checks, 16 integration test assertions (7 test images)
+
 ## Summary of What's Done
 
 Core framework is **tested and working** with a full service module ecosystem:
@@ -127,6 +138,7 @@ Core framework is **tested and working** with a full service module ecosystem:
 - Init scripts for pre-service setup
 - Declarative users/groups with auto-generated /etc/passwd, /etc/group
 - Declarative rootfs: pure Nix derivations for s6-rc tree, passwd/group, symlinks
+- Declarative files: NixOS `environment.etc`-style `files.*` with `text`/`source`/`mode`/`enable`
 - Graceful shutdown: per-service stop signal and timeout
 - Per-service logging: opt-in s6-log with rotation
 - NixOS-style assertions and warnings

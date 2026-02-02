@@ -206,12 +206,8 @@ in
 
     packages = [ cfg.package ];
 
-    files = [
-      {
-        source = if cfg.configFile != null then cfg.configFile else dnsmasqConf;
-        target = "etc/dnsmasq.conf";
-      }
-    ];
+    files."etc/dnsmasq.conf".source =
+      if cfg.configFile != null then cfg.configFile else dnsmasqConf;
 
     s6Services.dnsmasq = {
       kind = "longrun";

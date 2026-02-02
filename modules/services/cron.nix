@@ -56,12 +56,8 @@ in
   config = lib.mkIf cfg.enable {
     packages = [ cfg.package ];
 
-    files = [
-      {
-        source = if cfg.crontabFile != null then cfg.crontabFile else crontab;
-        target = "etc/crontab";
-      }
-    ];
+    files."etc/crontab".source =
+      if cfg.crontabFile != null then cfg.crontabFile else crontab;
 
     s6Services.cron = {
       kind = "longrun";

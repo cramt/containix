@@ -161,7 +161,7 @@ in
 , env ? {}
 , copyToRoot ? []
 , extraPaths ? []            # packages whose /bin/* should appear in /usr/local/bin
-, extraFiles ? []            # [{ source = ./file; target = "etc/foo"; }]
+, extraFiles ? []            # [{ source = ./file; target = "etc/foo"; mode = "0444"; }]
 , services ? {}              # s6-rc services graph
 , labels ? {}                # OCI labels
 , exposedPorts ? []          # list of port ints -> OCI ExposedPorts
@@ -264,7 +264,8 @@ let
     # Extra files from modules (config files, static assets, etc.)
     ${lib.concatStringsSep "\n" (map (f: ''
       mkdir -p "$out/$(dirname "${f.target}")"
-      cp --no-preserve=mode "${f.source}" "$out/${f.target}"
+      cp -r --no-preserve=mode "${f.source}" "$out/${f.target}"
+      chmod ${f.mode or "0444"} "$out/${f.target}"
     '') extraFiles)}
   '';
 

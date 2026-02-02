@@ -291,12 +291,8 @@ in
   config = lib.mkIf cfg.enable {
     packages = [ cfg.package ];
 
-    files = [
-      {
-        source = if cfg.configFile != null then cfg.configFile else haproxyConf;
-        target = "etc/haproxy/haproxy.cfg";
-      }
-    ];
+    files."etc/haproxy/haproxy.cfg".source =
+      if cfg.configFile != null then cfg.configFile else haproxyConf;
 
     s6Services.haproxy = {
       kind = "longrun";

@@ -273,12 +273,8 @@ in
 
     packages = [ cfg.package ];
 
-    files = [
-      {
-        source = if cfg.configFile != null then cfg.configFile else unboundConf;
-        target = "etc/unbound/unbound.conf";
-      }
-    ];
+    files."etc/unbound/unbound.conf".source =
+      if cfg.configFile != null then cfg.configFile else unboundConf;
 
     # Generate DNSSEC root trust anchor if DNSSEC is enabled
     initScripts = lib.mkIf cfg.dnssec.enable {

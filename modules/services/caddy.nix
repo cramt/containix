@@ -129,12 +129,8 @@ in
   config = lib.mkIf cfg.enable {
     packages = [ cfg.package ];
 
-    files = [
-      {
-        source = if cfg.configFile != null then cfg.configFile else caddyfile;
-        target = "etc/caddy/Caddyfile";
-      }
-    ];
+    files."etc/caddy/Caddyfile".source =
+      if cfg.configFile != null then cfg.configFile else caddyfile;
 
     s6Services.caddy = {
       kind = "longrun";

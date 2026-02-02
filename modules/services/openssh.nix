@@ -191,9 +191,7 @@ in
 
     packages = [ cfg.package ];
 
-    files = [
-      { source = sshdConfig; target = "etc/ssh/sshd_config"; }
-    ];
+    files."etc/ssh/sshd_config".source = sshdConfig;
 
     # Generate host keys and set up privsep dir before starting sshd
     initScripts.openssh-hostkeys = ''

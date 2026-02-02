@@ -64,9 +64,7 @@ in
       CUSTOM_QUERIES_CONFIG_PATH = "${customQueriesFile}";
     };
 
-    files = [
-      { source = alloyConfigFile; target = "etc/alloy/main.alloy"; }
-    ];
+    files."etc/alloy/main.alloy".source = alloyConfigFile;
 
     s6Services.grafana-alloy = {
       kind = "longrun";

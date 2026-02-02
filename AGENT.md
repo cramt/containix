@@ -95,7 +95,8 @@ User config  -->  evalModules  -->  evaluated config  -->  mkS6RcImage  -->  OCI
    - `environment` (attrset of env vars)
    - `packages` (list of packages -> `/usr/local/bin`)
    - `copyToRoot` (extra rootfs store paths)
-   - `files` (list of `{ source, target }`)
+   - `files` (NixOS-style attrset keyed by target path: `files."etc/foo".text = "..."` or
+     `files."etc/foo".source = ./file`. Supports `enable`, `mode`. Like `environment.etc`.)
    - `secrets` (runtime secrets: `secrets.<name>.{file, envVar}`, defaults to
      `/run/secrets/<name>`, optional contenv integration)
    - `initScripts` (named oneshot scripts that run before all services)
@@ -129,9 +130,8 @@ in {
   config = lib.mkIf cfg.enable {
     packages = [ cfg.package ];  # if it needs binaries in PATH
 
-    files = [
-      { source = someConfigFile; target = "etc/<name>/<name>.conf"; }
-    ];
+    files."etc/<name>/<name>.conf".source = someConfigFile;
+    # or inline:  files."etc/<name>/<name>.conf".text = "config content";
 
     s6Services.<name> = {
       kind = "longrun";  # or "oneshot"
